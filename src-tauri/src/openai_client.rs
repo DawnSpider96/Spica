@@ -66,16 +66,21 @@ struct OpenAIError {
 struct ErrorDetails {
     message: String,
     #[serde(rename = "type")]
+    #[allow(dead_code)]
     error_type: String,
     code: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TimelineEvent {
+    pub text: String,
+    pub dialogue: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LLMTab {
     pub title: String,
-    pub content: String,
-    #[serde(rename = "type")]
-    pub tab_type: Option<String>,
+    pub timeline: Vec<TimelineEvent>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -103,18 +108,17 @@ impl OpenAIClient {
         })
     }
 
-    pub async fn send_prompt(&self, prompt: &str) -> Result<String, ClientError> {
+    pub async fn send_prompt(&self, system_prompt: &str, user_prompt: &str) -> Result<String, ClientError> {
         let request_body = OpenAIPrompt {
             model: self.model.clone(),
             messages: vec![
                 Message {
                     role: "system".to_string(),
-                    // TODO change prompt
-                    content: "You are a creative writing assistant. Help the user with their story by providing well-structured, engaging content.".to_string(),
+                    content: system_prompt.to_string(),
                 },
                 Message {
                     role: "user".to_string(),
-                    content: prompt.to_string(),
+                    content: user_prompt.to_string(),
                 }
             ],
         };

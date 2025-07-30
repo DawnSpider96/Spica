@@ -1,264 +1,589 @@
 import React, { useState, useEffect } from 'react';
-import { useAppStore } from '../store/useAppStore';
-import { X } from 'lucide-react';
+import { useAppStore } from '../stores';
+import { X, Plus, Trash2, MessageSquare, Hash, Tag, ChevronDown, ChevronUp } from 'lucide-react';
+import TextareaAutosize from 'react-textarea-autosize';
 
 export const ModalEditor: React.FC = () => {
   const { 
+    draft_tabs,
+    characters,
+    stars,
+    idea_bank,
     ui,
-    draftTabs,
-    blueprint,
     closeModal,
     updateDraftTab,
-    deleteDraftTab,
     updateCharacter,
-    deleteCharacter,
     updateStar,
-    deleteStar
+    deleteDraftTab,
+    deleteCharacter,
+    deleteStar,
+    addTimelineEvent,
+    updateTimelineEvent,
+    deleteTimelineEvent,
+    addDescription,
+    updateDescription,
+    deleteDescription
   } = useAppStore();
 
-  const [formData, setFormData] = useState({
-    title: '',
-    content: '',
-    name: '',
-    description: '',
-    tags: '',
-  });
+  const [localState, setLocalState] = useState<any>({});
+  const [expandedDialogues, setExpandedDialogues] = useState<Set<number>>(new Set());
 
-  const activeModal = ui.activeModal;
-  const isOpen = !!activeModal;
+  const modal = ui.activeModal;
+  const isOpen = modal !== null;
 
-  // Load data when modal opens
+  const currentEntity = isOpen ? (
+    modal.type === 'tab' ? draft_tabs[modal.id] :
+    modal.type === 'character' ? characters[modal.id] :
+    modal.type === 'star' ? stars[modal.id] :
+    null
+  ) : null;
+
+  // Determine if the current tab is read-only (in scene or bank, not in workbench)
+  const isTabReadOnly = modal?.type === 'tab' && currentEntity ? (
+    // Tab is read-only if it has a scene_id (in scene) OR is in idea bank
+    (currentEntity as any).scene_id !== undefined || idea_bank.stored_draft_tab_ids.includes(modal.id)
+  ) : false;
+
+  // Initialize local state when modal opens
   useEffect(() => {
-    if (!activeModal) {
-      setFormData({ title: '', content: '', name: '', description: '', tags: '' });
+    if (currentEntity) {
+      setLocalState({ ...currentEntity });
+    } else {
+      setLocalState({});
+    }
+  }, [currentEntity]);
+
+  const handleSave = () => {
+    if (!modal || !currentEntity) return;
+    
+    // Don't save if tab is read-only
+    if (isTabReadOnly) {
+      closeModal();
       return;
     }
 
-    const { type, id } = activeModal;
-
-    if (type === 'tab') {
-      const tab = draftTabs.find(t => t.id === id);
-      if (tab) {
-        setFormData({
-          title: tab.title,
-          content: tab.content,
-          name: '',
-          description: '',
-          tags: '',
-        });
-      }
-    } else if (type === 'character') {
-      const character = blueprint.characters.find(c => c.id === id);
-      if (character) {
-        setFormData({
-          title: '',
-          content: '',
-          name: character.name,
-          description: character.description,
-          tags: character.tags?.join(', ') || '',
-        });
-      }
-    } else if (type === 'star') {
-      const star = blueprint.stars.find(s => s.id === id);
-      if (star) {
-        setFormData({
-          title: star.title,
-          content: star.content,
-          name: '',
-          description: '',
-          tags: star.tags?.join(', ') || '',
-        });
-      }
+    switch (modal.type) {
+      case 'tab':
+        updateDraftTab(modal.id, localState);
+        break;
+      case 'character':
+        updateCharacter(modal.id, localState);
+        break;
+      case 'star':
+        updateStar(modal.id, localState);
+        break;
     }
-  }, [activeModal, draftTabs, blueprint]);
-
-  const handleSave = () => {
-    if (!activeModal) return;
-
-    const { type, id } = activeModal;
-
-    if (type === 'tab') {
-      updateDraftTab(id, {
-        title: formData.title,
-        content: formData.content,
-      });
-    } else if (type === 'character') {
-      updateCharacter(id, {
-        name: formData.name,
-        description: formData.description,
-        tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
-      });
-    } else if (type === 'star') {
-      updateStar(id, {
-        title: formData.title,
-        content: formData.content,
-        tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
-      });
-    }
-
     closeModal();
   };
 
   const handleDelete = () => {
-    if (!activeModal) return;
+    if (!modal || !currentEntity) return;
 
-    const confirmed = window.confirm('Are you sure you want to delete this item?');
-    if (!confirmed) return;
+    const confirmMessage = `Are you sure you want to delete this ${modal.type}? This action cannot be undone.`;
+    if (!window.confirm(confirmMessage)) return;
 
-    const { type, id } = activeModal;
-
-    if (type === 'tab') {
-      deleteDraftTab(id);
-    } else if (type === 'character') {
-      deleteCharacter(id);
-    } else if (type === 'star') {
-      deleteStar(id);
+    switch (modal.type) {
+      case 'tab':
+        deleteDraftTab(modal.id);
+        break;
+      case 'character':
+        deleteCharacter(modal.id);
+        break;
+      case 'star':
+        deleteStar(modal.id);
+        break;
     }
-
     closeModal();
   };
 
-  const handleChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  const handleAddTimelineEvent = () => {
+    if (modal?.type !== 'tab') return;
+    
+    const newEvent = {
+      text: 'New event',
+      dialogue: '',
+      associated_stars: []
+    };
+    
+    setLocalState((prev: any) => ({
+      ...prev,
+      timeline: [...(prev.timeline || []), { ...newEvent, id: `temp-${Date.now()}` }]
+    }));
   };
 
-  if (!isOpen) return null;
+  const handleUpdateTimelineEvent = (index: number, updates: any) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      timeline: prev.timeline.map((event: any, i: number) => 
+        i === index ? { ...event, ...updates } : event
+      )
+    }));
+  };
 
-  const getModalTitle = () => {
-    if (!activeModal) return '';
+  const handleDeleteTimelineEvent = (index: number) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      timeline: prev.timeline.filter((_: any, i: number) => i !== index)
+    }));
+  };
+
+  const handleAddDescription = () => {
+    if (modal?.type !== 'tab') return;
     
-    switch (activeModal.type) {
-      case 'tab': return 'Edit Draft Tab';
-      case 'character': return 'Edit Character';
-      case 'star': return 'Edit Note';
-      default: return 'Edit Item';
+    const newDescription = {
+      text: 'New description',
+      is_important: false,
+      origin_star_id: undefined
+    };
+    
+    setLocalState((prev: any) => ({
+      ...prev,
+      descriptions: [...(prev.descriptions || []), { ...newDescription, id: `temp-${Date.now()}` }]
+    }));
+  };
+
+  const handleUpdateDescription = (index: number, updates: any) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      descriptions: prev.descriptions.map((desc: any, i: number) => 
+        i === index ? { ...desc, ...updates } : desc
+      )
+    }));
+  };
+
+  const handleDeleteDescription = (index: number) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      descriptions: prev.descriptions.filter((_: any, i: number) => i !== index)
+    }));
+  };
+
+  const handleAddCharacterField = () => {
+    if (modal?.type !== 'character') return;
+    
+    const key = prompt('Field name:');
+    if (key && key.trim()) {
+      setLocalState((prev: any) => ({
+        ...prev,
+        fields: { ...prev.fields, [key.trim()]: '' }
+      }));
     }
   };
 
+  const handleUpdateCharacterField = (key: string, value: string) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      fields: { ...prev.fields, [key]: value }
+    }));
+  };
+
+  const handleDeleteCharacterField = (key: string) => {
+    setLocalState((prev: any) => {
+      const newFields = { ...prev.fields };
+      delete newFields[key];
+      return { ...prev, fields: newFields };
+    });
+  };
+
+  const handleAddCustomTag = () => {
+    if (modal?.type !== 'star') return;
+    
+    const tag = prompt('Custom tag:');
+    if (tag && tag.trim()) {
+      setLocalState((prev: any) => ({
+        ...prev,
+        tags: {
+          ...prev.tags,
+          custom: [...(prev.tags.custom || []), tag.trim()]
+        }
+      }));
+    }
+  };
+
+  const handleDeleteCustomTag = (index: number) => {
+    setLocalState((prev: any) => ({
+      ...prev,
+      tags: {
+        ...prev.tags,
+        custom: prev.tags.custom.filter((_: string, i: number) => i !== index)
+      }
+    }));
+  };
+
+  const toggleDialogue = (index: number) => {
+    setExpandedDialogues(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
+      }
+      return newSet;
+    });
+  };
+
+  if (!isOpen || !currentEntity) return null;
+
   return (
-    <div className="modal-backdrop" onClick={closeModal}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={closeModal}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3 className="modal-title">{getModalTitle()}</h3>
+          <h3>
+            {isTabReadOnly ? 'View' : 'Edit'} {modal.type === 'tab' ? 'Draft Tab' :
+                 modal.type === 'character' ? `Character: ${(currentEntity as any).name}` :
+                 modal.type === 'star' ? `Star: ${(currentEntity as any).title}` : ''}
+            {isTabReadOnly && <span className="text-muted"> (Read Only)</span>}
+          </h3>
           <button className="icon-button" onClick={closeModal}>
             <X size={20} />
           </button>
         </div>
 
         <div className="modal-body">
-          {/* Tab Editor */}
-          {activeModal?.type === 'tab' && (
-            <>
-              <div className="form-field mb-4">
-                <label className="form-label">Title</label>
-                <input
-                  className="input"
-                  value={formData.title}
-                  onChange={(e) => handleChange('title', e.target.value)}
-                  placeholder="Enter title..."
-                />
+          {modal.type === 'tab' && (
+            <div className="tab-editor">
+              {/* Timeline Events */}
+              <div className="section mb-6">
+                <div className="section-header-with-action">
+                  <h4>Timeline Events</h4>
+                  {!isTabReadOnly && (
+                    <button 
+                      className="button button-secondary"
+                      onClick={handleAddTimelineEvent}
+                    >
+                      <Plus size={16} />
+                      Add Event
+                    </button>
+                  )}
+                </div>
+                
+                <div className="timeline-events">
+                  {(localState.timeline || []).map((event: any, index: number) => (
+                    <div key={index} className="timeline-event-editor">
+                      <div className="event-header">
+                        <span className="event-number">#{index + 1}</span>
+                        {!isTabReadOnly && (
+                          <button 
+                            className="icon-button"
+                            onClick={() => handleDeleteTimelineEvent(index)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="event-fields">
+                        <div className="field">
+                          <label>Event</label>
+                          <TextareaAutosize
+                            className="textarea"
+                            placeholder="What happens..."
+                            value={event.text}
+                            onChange={(e) => handleUpdateTimelineEvent(index, { text: e.target.value })}
+                            minRows={1}
+                            readOnly={isTabReadOnly}
+                          />
+                        </div>
+                        
+                        <div className="field">
+                          <button
+                            type="button"
+                            className="collapsible-label"
+                            onClick={() => toggleDialogue(index)}
+                          >
+                            <MessageSquare size={14} />
+                            <span>Dialogue</span>
+                            {expandedDialogues.has(index) ? 
+                              <ChevronUp size={14} /> : 
+                              <ChevronDown size={14} />
+                            }
+                          </button>
+                          {expandedDialogues.has(index) && (
+                            <TextareaAutosize
+                              className="textarea"
+                              placeholder="What they say..."
+                              value={event.dialogue || ''}
+                              onChange={(e) => handleUpdateTimelineEvent(index, { dialogue: e.target.value })}
+                              minRows={2}
+                              readOnly={isTabReadOnly}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {(localState.timeline || []).length === 0 && (
+                    <div className="empty-state">
+                      <p className="text-muted">No timeline events yet</p>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="form-field mb-4">
-                <label className="form-label">Content</label>
-                <textarea
+
+              {/* Descriptions */}
+              <div className="section mb-6">
+                <div className="section-header-with-action">
+                  <h4>Descriptions & Notes</h4>
+                  {!isTabReadOnly && (
+                    <button 
+                      className="button button-secondary"
+                      onClick={handleAddDescription}
+                    >
+                      <Plus size={16} />
+                      Add Description
+                    </button>
+                  )}
+                </div>
+                
+                <div className="descriptions">
+                  {(localState.descriptions || []).map((desc: any, index: number) => (
+                    <div key={index} className="description-editor">
+                      <div className="description-header">
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={desc.is_important}
+                            onChange={(e) => handleUpdateDescription(index, { is_important: e.target.checked })}
+                            disabled={isTabReadOnly}
+                          />
+                          Important
+                        </label>
+                        {!isTabReadOnly && (
+                          <button 
+                            className="icon-button"
+                            onClick={() => handleDeleteDescription(index)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                      
+                      <TextareaAutosize
+                        className="textarea"
+                        placeholder="Description or note..."
+                        value={desc.text}
+                        onChange={(e) => handleUpdateDescription(index, { text: e.target.value })}
+                        minRows={2}
+                        readOnly={isTabReadOnly}
+                      />
+                    </div>
+                  ))}
+                  
+                  {(localState.descriptions || []).length === 0 && (
+                    <div className="empty-state">
+                      <p className="text-muted">No descriptions yet</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="section">
+                <h4>Summary</h4>
+                <TextareaAutosize
                   className="textarea"
-                  value={formData.content}
-                  onChange={(e) => handleChange('content', e.target.value)}
-                  placeholder="Enter content..."
-                  rows={12}
+                  placeholder="What does this draft tab achieve narratively? (LLM can generate this)"
+                  value={localState.summary || ''}
+                  onChange={(e) => setLocalState((prev: any) => ({ ...prev, summary: e.target.value }))}
+                  minRows={3}
                 />
               </div>
-            </>
+            </div>
           )}
 
-          {/* Character Editor */}
-          {activeModal?.type === 'character' && (
-            <>
-              <div className="form-field mb-4">
-                <label className="form-label">Name</label>
+          {modal.type === 'character' && (
+            <div className="character-editor">
+              <div className="field mb-4">
+                <label>Name</label>
                 <input
+                  type="text"
                   className="input"
-                  value={formData.name}
-                  onChange={(e) => handleChange('name', e.target.value)}
-                  placeholder="Character name..."
+                  value={localState.name || ''}
+                  onChange={(e) => setLocalState((prev: any) => ({ ...prev, name: e.target.value }))}
                 />
               </div>
-              <div className="form-field mb-4">
-                <label className="form-label">Description</label>
-                <textarea
-                  className="textarea"
-                  value={formData.description}
-                  onChange={(e) => handleChange('description', e.target.value)}
-                  placeholder="Character description..."
-                  rows={8}
-                />
+
+              <div className="section">
+                <div className="section-header-with-action">
+                  <h4>Character Fields</h4>
+                  <button 
+                    className="button button-secondary"
+                    onClick={handleAddCharacterField}
+                  >
+                    <Plus size={16} />
+                    Add Field
+                  </button>
+                </div>
+                
+                <div className="character-fields">
+                  {Object.entries(localState.fields || {}).map(([key, value]) => (
+                    <div key={key} className="character-field-editor">
+                      <div className="field-header">
+                        <span className="field-key">{key}</span>
+                        <button 
+                          className="icon-button"
+                          onClick={() => handleDeleteCharacterField(key)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <TextareaAutosize
+                        className="textarea"
+                        placeholder={`${key}...`}
+                        value={value as string}
+                        onChange={(e) => handleUpdateCharacterField(key, e.target.value)}
+                        minRows={2}
+                      />
+                    </div>
+                  ))}
+                  
+                  {Object.keys(localState.fields || {}).length === 0 && (
+                    <div className="empty-state">
+                      <p className="text-muted">No character fields yet</p>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="form-field mb-4">
-                <label className="form-label">Tags (comma-separated)</label>
-                <input
-                  className="input"
-                  value={formData.tags}
-                  onChange={(e) => handleChange('tags', e.target.value)}
-                  placeholder="protagonist, hero, warrior..."
-                />
-              </div>
-            </>
+            </div>
           )}
 
-          {/* Star Editor */}
-          {activeModal?.type === 'star' && (
-            <>
-              <div className="form-field mb-4">
-                <label className="form-label">Title</label>
+          {modal.type === 'star' && (
+            <div className="star-editor">
+              <div className="field mb-4">
+                <label>Title</label>
                 <input
+                  type="text"
                   className="input"
-                  value={formData.title}
-                  onChange={(e) => handleChange('title', e.target.value)}
-                  placeholder="Note title..."
+                  value={localState.title || ''}
+                  onChange={(e) => setLocalState((prev: any) => ({ ...prev, title: e.target.value }))}
                 />
               </div>
-              <div className="form-field mb-4">
-                <label className="form-label">Content</label>
-                <textarea
+
+              <div className="field mb-4">
+                <label>Content</label>
+                <TextareaAutosize
                   className="textarea"
-                  value={formData.content}
-                  onChange={(e) => handleChange('content', e.target.value)}
-                  placeholder="Note content..."
-                  rows={8}
+                  placeholder="The key fact or information..."
+                  value={localState.body || ''}
+                  onChange={(e) => setLocalState((prev: any) => ({ ...prev, body: e.target.value }))}
+                  minRows={4}
                 />
               </div>
-              <div className="form-field mb-4">
-                <label className="form-label">Tags (comma-separated)</label>
+
+              <div className="field mb-4">
+                <label>Priority ({Math.round((localState.priority || 0) * 100)}%)</label>
                 <input
-                  className="input"
-                  value={formData.tags}
-                  onChange={(e) => handleChange('tags', e.target.value)}
-                  placeholder="important, plot, character-development..."
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={localState.priority || 0}
+                  onChange={(e) => setLocalState((prev: any) => ({ ...prev, priority: parseFloat(e.target.value) }))}
                 />
               </div>
-            </>
+
+              <div className="section mb-4">
+                <h4>Tags</h4>
+                
+                <div className="tag-fields">
+                  <div className="field">
+                    <label style={{ color: 'white' }}>Scope</label>
+                    <select
+                      className="select"
+                      style={{
+                        backgroundColor: '#2d3a4a', // a soothing blue-gray
+                        color: '#2d3a4a',
+                        border: '1px solid #4a5a6a'
+                      }}
+                      value={localState.tags?.scope || 'CurrentScene'}
+                      onChange={(e) => setLocalState((prev: any) => ({
+                        ...prev,
+                        tags: { ...prev.tags, scope: e.target.value }
+                      }))}
+                    >
+                      <option value="CurrentScene">Current Scene</option>
+                      <option value="FuturePlot">Future Plot</option>
+                      <option value="Backstory">Backstory</option>
+                      <option value="Worldbuilding">Worldbuilding</option>
+                    </select>
+                  </div>
+
+                  <div className="field">
+                    <label style={{ color: 'white' }}>Status</label>
+                    <select
+                      className="select"
+                      style={{
+                        backgroundColor: '#2d3a4a', // a soothing blue-gray
+                        color: '#2d3a4a',
+                        border: '1px solid #4a5a6a'
+                      }}
+                      value={localState.tags?.status || 'Active'}
+                      onChange={(e) => setLocalState((prev: any) => ({
+                        ...prev,
+                        tags: { ...prev.tags, status: e.target.value }
+                      }))}
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Resolved">Resolved</option>
+                      <option value="Deferred">Deferred</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="section">
+                <div className="section-header-with-action">
+                  <h4>Custom Tags</h4>
+                  <button 
+                    className="button button-secondary"
+                    onClick={handleAddCustomTag}
+                  >
+                    <Plus size={16} />
+                    Add Tag
+                  </button>
+                </div>
+                
+                <div className="custom-tags">
+                  {(localState.tags?.custom || []).map((tag: string, index: number) => (
+                    <div key={index} className="custom-tag-editor">
+                      <span className="tag">{tag}</span>
+                      <button 
+                        className="icon-button"
+                        onClick={() => handleDeleteCustomTag(index)}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                  
+                  {(localState.tags?.custom || []).length === 0 && (
+                    <div className="empty-state">
+                      <p className="text-muted">No custom tags yet</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
         <div className="modal-footer">
-          <button 
-            className="button button-danger"
-            onClick={handleDelete}
-          >
-            Delete
-          </button>
-          <button 
-            className="button button-secondary"
-            onClick={closeModal}
-          >
-            Cancel
-          </button>
-          <button 
-            className="button"
-            onClick={handleSave}
-          >
-            Save
-          </button>
+          {!isTabReadOnly && (
+            <button className="button button-danger" onClick={handleDelete}>
+              Delete
+            </button>
+          )}
+          <div className="modal-footer-right">
+            {!isTabReadOnly && (
+              <button className="button button-secondary" onClick={closeModal}>
+                Cancel
+              </button>
+            )}
+            <button className="button" onClick={handleSave}>
+              {isTabReadOnly ? 'Close' : 'Save Changes'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
