@@ -149,37 +149,111 @@ impl AppConfig {
     }
 }
 
-// Parse LLM response into timeline events
-fn parse_timeline_from_response(response: &str) -> Vec<TimelineEvent> {
+// Parse LLM response into timeline events and extract summary
+fn parse_response(response: &str) -> (Vec<TimelineEvent>, Option<String>) {
     let mut timeline = Vec::new();
+    let mut summary: Option<String> = None;
     
-    for line in response.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        
-        // Check if line contains dialogue (indicated by quotes)
-        if let Some(dialogue_start) = line.find('"') {
-            if let Some(dialogue_end) = line.rfind('"') {
-                if dialogue_start < dialogue_end {
-                    let text_part = line[..dialogue_start].trim();
-                    let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
-                    
-                    timeline.push(TimelineEvent {
-                        text: text_part.to_string(),
-                        dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
-                    });
+    // Extract summary from between pipes (|summary text|)
+    if let Some(first_pipe) = response.rfind('|') {
+        if let Some(second_pipe) = response[..first_pipe].rfind('|') {
+            let summary_text = response[second_pipe + 1..first_pipe].trim();
+            if !summary_text.is_empty() {
+                summary = Some(summary_text.to_string());
+            }
+            
+            // Process only the content before the summary
+            let content_without_summary = &response[..second_pipe];
+            
+            for line in content_without_summary.lines() {
+                let line = line.trim();
+                if line.is_empty() {
                     continue;
                 }
+                
+                // Check if line contains dialogue (indicated by quotes)
+                if let Some(dialogue_start) = line.find('"') {
+                    if let Some(dialogue_end) = line.rfind('"') {
+                        if dialogue_start < dialogue_end {
+                            let text_part = line[..dialogue_start].trim();
+                            let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
+                            
+                            timeline.push(TimelineEvent {
+                                text: text_part.to_string(),
+                                dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
+                            });
+                            continue;
+                        }
+                    }
+                }
+                
+                // Regular text event
+                timeline.push(TimelineEvent {
+                    text: line.to_string(),
+                    dialogue: None,
+                });
+            }
+        } else {
+            // Fallback: no summary found, process entire response as timeline
+            for line in response.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                
+                // Check if line contains dialogue (indicated by quotes)
+                if let Some(dialogue_start) = line.find('"') {
+                    if let Some(dialogue_end) = line.rfind('"') {
+                        if dialogue_start < dialogue_end {
+                            let text_part = line[..dialogue_start].trim();
+                            let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
+                            
+                            timeline.push(TimelineEvent {
+                                text: text_part.to_string(),
+                                dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
+                            });
+                            continue;
+                        }
+                    }
+                }
+                
+                // Regular text event
+                timeline.push(TimelineEvent {
+                    text: line.to_string(),
+                    dialogue: None,
+                });
             }
         }
-        
-        // Regular text event
-        timeline.push(TimelineEvent {
-            text: line.to_string(),
-            dialogue: None,
-        });
+         } else {
+         // Fallback: no pipes found, process entire response as timeline
+        for line in response.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            
+            // Check if line contains dialogue (indicated by quotes)
+            if let Some(dialogue_start) = line.find('"') {
+                if let Some(dialogue_end) = line.rfind('"') {
+                    if dialogue_start < dialogue_end {
+                        let text_part = line[..dialogue_start].trim();
+                        let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
+                        
+                        timeline.push(TimelineEvent {
+                            text: text_part.to_string(),
+                            dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
+                        });
+                        continue;
+                    }
+                }
+            }
+            
+            // Regular text event
+            timeline.push(TimelineEvent {
+                text: line.to_string(),
+                dialogue: None,
+            });
+        }
     }
     
     if timeline.is_empty() {
@@ -190,7 +264,7 @@ fn parse_timeline_from_response(response: &str) -> Vec<TimelineEvent> {
         });
     }
     
-    timeline
+    (timeline, summary)
 }
 
 // Tauri commands
@@ -198,13 +272,14 @@ fn parse_timeline_from_response(response: &str) -> Vec<TimelineEvent> {
 async fn send_prompt(system_prompt: String, user_prompt: String, state: State<'_, AppConfig>) -> Result<LLMResponse, ApiError> {
     match state.openai_client.send_prompt(&system_prompt, &user_prompt).await {
         Ok(response) => {
-            // Parse the response into timeline events
-            let timeline = parse_timeline_from_response(&response);
+            // Parse the response into timeline events and extract summary
+            let (timeline, summary) = parse_response(&response);
             
             let tabs = vec![
                 openai_client::LLMTab {
                     title: "Generated Scene Segment".to_string(),
                     timeline,
+                    summary,
                 }
             ];
             

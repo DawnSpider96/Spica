@@ -46,6 +46,7 @@ export interface StarTags {
   scope: 'CurrentScene' | 'FuturePlot' | 'Backstory' | 'Worldbuilding';
   status: 'Active' | 'Resolved' | 'Deferred';
   custom: string[]; // freeform tags
+  constraint_context?: string[]; // ["anger", "confrontation", "public"]
 }
 
 export interface Star {
@@ -58,12 +59,22 @@ export interface Star {
   origin_draft_tab_id?: string; // DraftTab ID
   created_at: number;
   last_used_in_prompt?: number;
+  // Character constraint fields
+  constraint_type?: 'character_behavior' | 'character_dialogue' | 'character_emotion' | 'character_social' | 'character_physical';
+  applies_to_character?: string; // Character ID
+  situation_context?: string; // "when angry", "in public", "with authority"
+  source_event?: {
+    tab_id: string;
+    event_id: string;
+    event_text: string; // Snapshot of the problematic event
+  };
 }
 
 export interface Character {
   id: string;
   name: string;
   fields: { [key: string]: string }; // user-defined fields
+  is_checked: boolean;
 }
 
 export interface Scene {
@@ -130,6 +141,7 @@ export interface LLMResponse {
       text: string;
       dialogue?: string;
     }>;
+    summary?: string;
   }>;
 }
 

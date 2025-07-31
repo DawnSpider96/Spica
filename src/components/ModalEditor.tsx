@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../stores';
 import { X, Plus, Trash2, MessageSquare, Hash, Tag, ChevronDown, ChevronUp } from 'lucide-react';
 import TextareaAutosize from 'react-textarea-autosize';
+import { EventContextMenu } from './EventContextMenu';
 
 export const ModalEditor: React.FC = () => {
   const { 
@@ -27,6 +28,12 @@ export const ModalEditor: React.FC = () => {
 
   const [localState, setLocalState] = useState<any>({});
   const [expandedDialogues, setExpandedDialogues] = useState<Set<number>>(new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    eventId: string;
+    eventText: string;
+    tabId: string;
+    position: { x: number; y: number };
+  } | null>(null);
 
   const modal = ui.activeModal;
   const isOpen = modal !== null;
@@ -222,6 +229,23 @@ export const ModalEditor: React.FC = () => {
     });
   };
 
+  const handleEventRightClick = (event: React.MouseEvent, eventIndex: number) => {
+    if (!modal || modal.type !== 'tab') return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const timelineEvent = localState.timeline[eventIndex];
+    if (!timelineEvent) return;
+    
+    setContextMenu({
+      eventId: timelineEvent.id,
+      eventText: timelineEvent.text,
+      tabId: modal.id,
+      position: { x: event.clientX, y: event.clientY }
+    });
+  };
+
   if (!isOpen || !currentEntity) return null;
 
   return (
@@ -259,7 +283,11 @@ export const ModalEditor: React.FC = () => {
                 
                 <div className="timeline-events">
                   {(localState.timeline || []).map((event: any, index: number) => (
-                    <div key={index} className="timeline-event-editor">
+                    <div 
+                      key={index} 
+                      className="timeline-event-editor"
+                      onContextMenu={(e) => handleEventRightClick(e, index)}
+                    >
                       <div className="event-header">
                         <span className="event-number">#{index + 1}</span>
                         {!isTabReadOnly && (
@@ -341,7 +369,7 @@ export const ModalEditor: React.FC = () => {
                     <div key={index} className="description-editor">
                       <div className="description-header">
                         <label className="checkbox-label">
-                          <input
+                <input
                             type="checkbox"
                             checked={desc.is_important}
                             onChange={(e) => handleUpdateDescription(index, { is_important: e.target.checked })}
@@ -429,13 +457,13 @@ export const ModalEditor: React.FC = () => {
                         </button>
                       </div>
                       <TextareaAutosize
-                        className="textarea"
+                  className="textarea"
                         placeholder={`${key}...`}
                         value={value as string}
                         onChange={(e) => handleUpdateCharacterField(key, e.target.value)}
                         minRows={2}
-                      />
-                    </div>
+                />
+              </div>
                   ))}
                   
                   {Object.keys(localState.fields || {}).length === 0 && (
@@ -571,20 +599,31 @@ export const ModalEditor: React.FC = () => {
         <div className="modal-footer">
           {!isTabReadOnly && (
             <button className="button button-danger" onClick={handleDelete}>
-              Delete
-            </button>
+            Delete
+          </button>
           )}
           <div className="modal-footer-right">
             {!isTabReadOnly && (
               <button className="button button-secondary" onClick={closeModal}>
-                Cancel
-              </button>
+            Cancel
+          </button>
             )}
             <button className="button" onClick={handleSave}>
               {isTabReadOnly ? 'Close' : 'Save Changes'}
-            </button>
+          </button>
           </div>
         </div>
+        
+        {/* Context Menu */}
+        {contextMenu && (
+          <EventContextMenu
+            eventId={contextMenu.eventId}
+            tabId={contextMenu.tabId}
+            eventText={contextMenu.eventText}
+            position={contextMenu.position}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
       </div>
     </div>
   );

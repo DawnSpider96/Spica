@@ -81,6 +81,7 @@ pub struct TimelineEvent {
 pub struct LLMTab {
     pub title: String,
     pub timeline: Vec<TimelineEvent>,
+    pub summary: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,7 +105,8 @@ impl OpenAIClient {
             client: reqwest::Client::new(),
             api_key,
             base_url: "https://api.openai.com/v1".to_string(),
-            model: "gpt-4o-mini".to_string(),
+            // model: "gpt-4o-mini".to_string(),
+            model: "gpt-4o".to_string(),
         })
     }
 

@@ -113,7 +113,7 @@ const SceneItem: React.FC<SceneItemProps> = ({ tabId, index }) => {
           <div className="plan-steps-indicator text-xs">
             ✓ Fulfills {tab.fulfilled_plan_steps.length} plan step{tab.fulfilled_plan_steps.length !== 1 ? 's' : ''}
           </div>
-        )}
+      )}
       </div>
     </div>
   );

@@ -84,34 +84,80 @@ export class LLMService {
       context += scene.plan.raw_text + '\n\n';
     }
 
-    // Recent timeline events
+    // Recent timeline events - use summaries for older tabs, full content for latest 3
     if (recentTabs.length > 0) {
       context += '### RECENT EVENTS\n';
+      
+      // Split tabs: older tabs (summaries) and recent tabs (full content)
+      const olderTabs = recentTabs.slice(0, -3); // All except last 3
       const lastThreeTabs = recentTabs.slice(-3); // Last 3 tabs
+      
+      // Add summaries for older tabs (chronological order)
+      olderTabs.forEach((tab) => {
+        if (tab.summary && tab.summary.trim()) {
+          context += `- ${tab.summary}\n`;
+        }
+      });
+      
+      // Add full timeline content for recent tabs (chronological order)
       lastThreeTabs.forEach((tab) => {
-        context += `**Section ${tab.index + 1}**\n`;
         tab.timeline.forEach(event => {
           const dialoguePart = event.dialogue ? ` -> "${event.dialogue}"` : '';
           context += `- ${event.text}${dialoguePart}\n`;
         });
-        context += '\n';
       });
+      
+      context += '\n';
     }
 
-    // Key facts (checked stars)
-    console.log('Processing stars for context:', checkedStars.length, checkedStars.map(s => ({ title: s.title, checked: s.is_checked })));
-    if (checkedStars.length > 0) {
+    // Character constraints (filter constraints from checked stars)
+    const characterConstraints = checkedStars.filter(star => star.constraint_type && star.applies_to_character);
+    if (characterConstraints.length > 0) {
+      context += '### CHARACTER BEHAVIORAL CONSTRAINTS\n';
+      
+      // Group constraints by character
+      const constraintsByCharacter = characterConstraints.reduce((acc, star) => {
+        const characterId = star.applies_to_character!;
+        const character = characters.find(c => c.id === characterId);
+        const characterName = character?.name || 'Unknown Character';
+        
+        if (!acc[characterName]) {
+          acc[characterName] = [];
+        }
+        acc[characterName].push(star);
+        return acc;
+      }, {} as Record<string, typeof characterConstraints>);
+      
+      // Add constraints organized by character
+      Object.entries(constraintsByCharacter).forEach(([characterName, constraints]) => {
+        context += `**${characterName}**\n`;
+        constraints
+          .sort((a, b) => b.priority - a.priority)
+          .forEach(constraint => {
+            const situationText = constraint.situation_context ? ` (${constraint.situation_context})` : '';
+            const typeLabel = constraint.constraint_type!.replace('character_', '').replace('_', ' ');
+            context += `- ${typeLabel}${situationText}: ${constraint.body}\n`;
+          });
+        context += '\n';
+      });
+      console.log('Added CHARACTER CONSTRAINTS section with', characterConstraints.length, 'constraints');
+    }
+
+    // Key facts (non-constraint checked stars)
+    const nonConstraintStars = checkedStars.filter(star => !star.constraint_type);
+    console.log('Processing stars for context:', nonConstraintStars.length, nonConstraintStars.map(s => ({ title: s.title, checked: s.is_checked })));
+    if (nonConstraintStars.length > 0) {
       context += '### KEY FACTS\n';
-      checkedStars
+      nonConstraintStars
         .sort((a, b) => b.priority - a.priority)
         .slice(0, 10) // Top 10 stars
         .forEach(star => {
           context += `- ${star.title}: ${star.body}\n`;
         });
       context += '\n';
-      console.log('Added KEY FACTS section with', checkedStars.length, 'stars');
+      console.log('Added KEY FACTS section with', nonConstraintStars.length, 'stars');
     } else {
-      console.log('No checked stars found - KEY FACTS section not added');
+      console.log('No checked non-constraint stars found - KEY FACTS section not added');
     }
 
     return context;

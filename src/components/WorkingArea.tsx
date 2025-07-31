@@ -1,8 +1,251 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../stores';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { Send, Plus, Edit, PlayCircle, Trash2, MessageSquare, Eye, Archive, ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
+import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { DndContext, closestCenter, DragEndEvent } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
+import { Send, Plus, Edit, PlayCircle, Trash2, MessageSquare, Eye, Archive, ArrowLeft, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
 import TextareaAutosize from 'react-textarea-autosize';
+
+interface SortableWorkbenchTabProps {
+  tab: any;
+  scenes: any;
+  openModal: (type: "tab" | "star" | "character", id: string) => void;
+  addTabToScene: (tabId: string, sceneId: string) => void;
+  moveTabToIdeaBank: (tabId: string) => void;
+  deleteDraftTab: (tabId: string) => void;
+  active_scene_id: string | undefined;
+}
+
+const SortableWorkbenchTab: React.FC<SortableWorkbenchTabProps> = ({ 
+  tab, scenes, openModal, addTabToScene, moveTabToIdeaBank, deleteDraftTab, active_scene_id 
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: tab.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="draft-tab-card card">
+      <div className="tab-header">
+        <div 
+          className="drag-handle"
+          {...attributes}
+          {...listeners}
+          style={{ cursor: 'grab', marginRight: '8px' }}
+        >
+          <GripVertical size={16} />
+        </div>
+        <h4 className="tab-title">
+          {tab.scene_id ? 
+            `Tab from ${scenes[tab.scene_id]?.name || 'Unknown Scene'}` :
+            'Workbench Tab'
+          }
+        </h4>
+        <div className="tab-meta">
+          <span className="tab-stats">
+            {tab.timeline.length} events
+            {tab.descriptions.length > 0 && `, ${tab.descriptions.length} notes`}
+          </span>
+        </div>
+      </div>
+      
+      {/* Timeline Preview */}
+      <div className="tab-content-preview">
+        {tab.timeline.length > 0 ? (
+          <div className="timeline-preview">
+            {tab.timeline.slice(0, 3).map((event: any) => (
+              <div key={event.id} className="event-preview">
+                <span className="event-text">
+                  {event.text.length > 50 ? event.text.substring(0, 50) + '...' : event.text}
+                </span>
+                {event.dialogue && (
+                  <MessageSquare size={12} className="dialogue-icon" />
+                )}
+              </div>
+            ))}
+            {tab.timeline.length > 3 && (
+              <div className="event-preview text-muted">
+                +{tab.timeline.length - 3} more events
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="empty-timeline">
+            <p className="text-muted">No events yet</p>
+          </div>
+        )}
+      </div>
+      
+      <div className="tab-actions">
+        <button 
+          className="button button-secondary"
+          onClick={() => openModal('tab', tab.id)}
+        >
+          <Edit size={14} />
+          Edit
+        </button>
+        
+        {active_scene_id && (
+          <button 
+            className="button button-secondary"
+            onClick={() => addTabToScene(tab.id, active_scene_id)}
+          >
+            <PlayCircle size={14} />
+            Add to Scene
+          </button>
+        )}
+        
+        <button 
+          className="button button-secondary"
+          onClick={() => moveTabToIdeaBank(tab.id)}
+        >
+          <Archive size={14} />
+          Move to Bank
+        </button>
+        
+        <button 
+          className="button button-danger"
+          onClick={() => deleteDraftTab(tab.id)}
+        >
+          <Trash2 size={14} />
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+};
+
+interface SortableIdeaBankTabProps {
+  tab: any;
+  scenes: any;
+  openModal: (type: "tab" | "star" | "character", id: string) => void;
+  moveTabFromIdeaBank: (tabId: string, sceneId: string) => void;
+  moveTabToWorkbench: (tabId: string) => void;
+  deleteDraftTab: (tabId: string) => void;
+  active_scene_id: string | undefined;
+}
+
+const SortableIdeaBankTab: React.FC<SortableIdeaBankTabProps> = ({ 
+  tab, scenes, openModal, moveTabFromIdeaBank, moveTabToWorkbench, deleteDraftTab, active_scene_id 
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: tab.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="draft-tab-card card">
+      <div className="tab-header">
+        <div 
+          className="drag-handle"
+          {...attributes}
+          {...listeners}
+          style={{ cursor: 'grab', marginRight: '8px' }}
+        >
+          <GripVertical size={16} />
+        </div>
+        <h4 className="tab-title">
+          Banked: {tab.timeline.length > 0 ? tab.timeline[0].text.substring(0, 30) : 'Empty tab'}
+          {tab.timeline[0]?.text.length > 30 ? '...' : ''}
+        </h4>
+        <div className="tab-meta">
+          <span className="tab-stats">
+            {tab.timeline.length} events
+            {tab.descriptions.length > 0 && `, ${tab.descriptions.length} notes`}
+          </span>
+        </div>
+      </div>
+      
+      {/* Timeline Preview */}
+      <div className="tab-content-preview">
+        {tab.timeline.length > 0 ? (
+          <div className="timeline-preview">
+            {tab.timeline.slice(0, 3).map((event: any) => (
+              <div key={event.id} className="event-preview">
+                <span className="event-text">
+                  {event.text.length > 50 ? event.text.substring(0, 50) + '...' : event.text}
+                </span>
+                {event.dialogue && (
+                  <MessageSquare size={12} className="dialogue-icon" />
+                )}
+              </div>
+            ))}
+            {tab.timeline.length > 3 && (
+              <div className="event-preview text-muted">
+                +{tab.timeline.length - 3} more events
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="empty-timeline">
+            <p className="text-muted">No events yet</p>
+          </div>
+        )}
+      </div>
+      
+      <div className="tab-actions">
+        <button 
+          className="button button-secondary"
+          onClick={() => openModal('tab', tab.id)}
+        >
+          <Edit size={14} />
+          Edit
+        </button>
+        
+        {active_scene_id && (
+          <button 
+            className="button button-secondary"
+            onClick={() => moveTabFromIdeaBank(tab.id, active_scene_id)}
+          >
+            <PlayCircle size={14} />
+            Add to Scene
+          </button>
+        )}
+        
+        <button 
+          className="button button-secondary"
+          onClick={() => moveTabToWorkbench(tab.id)}
+        >
+          <ArrowLeft size={14} />
+          Move to Workbench
+        </button>
+        
+        <button 
+          className="button button-danger"
+          onClick={() => deleteDraftTab(tab.id)}
+        >
+          <Trash2 size={14} />
+          Delete
+        </button>
+      </div>
+      
+      <div className="tab-meta text-xs text-muted">
+        Banked from: {tab.scene_id ? scenes[tab.scene_id]?.name || 'Unknown Scene' : 'Workbench'}
+      </div>
+    </div>
+  );
+};
 
 export const WorkingArea: React.FC = () => {
   const { 
@@ -14,7 +257,7 @@ export const WorkingArea: React.FC = () => {
     sendPrompt, 
     createDraftTab, 
     openModal, 
-    moveTabToScene, // Updated from addTabToScene
+    addTabToScene, // Fixed from moveTabToScene
     deleteDraftTab,
     moveTabToIdeaBank,
     moveTabFromIdeaBank,
@@ -22,6 +265,8 @@ export const WorkingArea: React.FC = () => {
     buildLLMContext,
     getWorkbenchTabs, // New function for workbench tabs
     getDraftTabsForScene, // New function for scene tabs
+    reorderWorkbenchTabs,
+    reorderIdeaBankTabs,
     ui
   } = useAppStore();
   
@@ -29,6 +274,35 @@ export const WorkingArea: React.FC = () => {
   const [bankCollapsed, setBankCollapsed] = useState(false);
   const activeScene = active_scene_id ? scenes[active_scene_id] : null;
 
+  const workbenchTabs = getWorkbenchTabs();
+  const workbenchTabIds = workbenchTabs.map(tab => tab.id);
+
+  const ideaBankTabs = idea_bank.stored_draft_tab_ids
+    .map(id => draft_tabs[id])
+    .filter(Boolean);
+  const ideaBankTabIds = idea_bank.stored_draft_tab_ids;
+
+  const handleWorkbenchDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = workbenchTabIds.indexOf(active.id as string);
+      const newIndex = workbenchTabIds.indexOf(over.id as string);
+      
+      reorderWorkbenchTabs(oldIndex, newIndex);
+    }
+  };
+
+  const handleIdeaBankDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = ideaBankTabIds.indexOf(active.id as string);
+      const newIndex = ideaBankTabIds.indexOf(over.id as string);
+      
+      reorderIdeaBankTabs(oldIndex, newIndex);
+    }
+  };
 
   const handleSendPrompt = async () => {
     if (!promptText.trim() || isLoading || !active_scene_id) return;
@@ -43,7 +317,7 @@ export const WorkingArea: React.FC = () => {
   }, { enableOnFormTags: ['textarea'] });
 
   const handleCreateDraftTab = () => {
-    createDraftTab('New Draft');
+    createDraftTab(); // Fixed - no arguments needed for workbench tabs
   };
 
   return (
@@ -132,112 +406,35 @@ export const WorkingArea: React.FC = () => {
           </div>
 
           <div className="draft-tabs-list">
-            {getWorkbenchTabs().map(tab => (
-              <div key={tab.id} className="draft-tab-card card">
-                <div className="tab-header">
-                  <h4 className="tab-title">
-                    {tab.scene_id ? 
-                      `Tab from ${scenes[tab.scene_id]?.name || 'Unknown Scene'}` :
-                      'Workbench Tab'
-                    }
-                  </h4>
-                  <div className="tab-meta">
-                    <span className="tab-stats">
-                      {tab.timeline.length} events
-                      {tab.descriptions.length > 0 && `, ${tab.descriptions.length} notes`}
-                    </span>
+            <DndContext 
+              collisionDetection={closestCenter}
+              onDragEnd={handleWorkbenchDragEnd}
+            >
+              <SortableContext 
+                items={workbenchTabIds}
+                strategy={verticalListSortingStrategy}
+              >
+                {workbenchTabs.map(tab => (
+                  <SortableWorkbenchTab 
+                    key={tab.id} 
+                    tab={tab} 
+                    scenes={scenes} 
+                    openModal={openModal} 
+                    addTabToScene={addTabToScene} 
+                    moveTabToIdeaBank={moveTabToIdeaBank} 
+                    deleteDraftTab={deleteDraftTab} 
+                    active_scene_id={active_scene_id} 
+                  />
+                ))}
+                
+                {workbenchTabs.length === 0 && (
+                  <div className="empty-state">
+                    <p className="text-muted">No items in workbench. Send a prompt or create a draft tab to get started.</p>
                   </div>
-                </div>
-                
-                {/* Timeline Preview */}
-                <div className="tab-content-preview">
-                  {tab.timeline.length > 0 ? (
-                    <div className="timeline-preview">
-                      {tab.timeline.slice(0, 3).map((event, index) => (
-                        <div key={event.id} className="timeline-event-preview">
-                          <span className="event-text">{event.text}</span>
-                          {event.dialogue && (
-                            <span className="event-dialogue">
-                              <MessageSquare size={12} />
-                              "{event.dialogue.length > 30 ? 
-                                `${event.dialogue.substring(0, 30)}...` : 
-                                event.dialogue}"
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                      {tab.timeline.length > 3 && (
-                        <div className="timeline-more text-sm text-muted">
-                          +{tab.timeline.length - 3} more events
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted">Empty timeline</p>
-                  )}
-                  
-                  {/* Summary */}
-                  {tab.summary && (
-                    <div className="tab-summary text-sm">
-                      <strong>Summary:</strong> {tab.summary}
-                    </div>
-                  )}
-                </div>
-                
-                <div className="tab-actions">
-                  <button 
-                    className="button button-secondary"
-                    onClick={() => openModal('tab', tab.id)}
-                  >
-                    <Edit size={14} />
-                    Edit
-                  </button>
-                  
-                  {active_scene_id && (
-                    <button 
-                      className="button button-secondary"
-                      onClick={() => moveTabToScene(tab.id, active_scene_id)}
-                    >
-                      <PlayCircle size={14} />
-                      Move to Scene
-                    </button>
-                  )}
-                  
-                  <button 
-                    className="button button-secondary"
-                    onClick={() => moveTabToIdeaBank(tab.id)}
-                  >
-                    <Archive size={14} />
-                    Move to Bank
-                  </button>
-                  
-                  <button 
-                    className="button button-danger"
-                    onClick={() => deleteDraftTab(tab.id)}
-                  >
-                    <Trash2 size={14} />
-                    Delete
-                  </button>
-                </div>
-                
-                <div className="tab-meta text-xs text-muted">
-                  Created: {new Date(tab.created_at).toLocaleDateString()}
-                  {tab.updated_at !== tab.created_at && (
-                    <>
-                      {' • '}
-                      Updated: {new Date(tab.updated_at).toLocaleDateString()}
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-            
-                          {getWorkbenchTabs().length === 0 && (
-                <div className="empty-state">
-                  <p className="text-muted">No items in workbench. Send a prompt or create a draft tab to get started.</p>
-                </div>
-              )}
-            </div>
+                )}
+              </SortableContext>
+            </DndContext>
+          </div>
         </div>
 
         {/* Scene */}
@@ -267,7 +464,7 @@ export const WorkingArea: React.FC = () => {
                   <div className="tab-content-preview">
                     {tab.timeline.length > 0 ? (
                       <div className="timeline-preview">
-                        {tab.timeline.slice(0, 2).map((event, idx) => (
+                        {tab.timeline.slice(0, 2).map((event) => (
                           <div key={event.id} className="timeline-event-preview">
                             <span className="event-text">{event.text}</span>
                             {event.dialogue && (
@@ -350,103 +547,36 @@ export const WorkingArea: React.FC = () => {
 
           {!bankCollapsed && (
             <div className="idea-bank-list">
-            {idea_bank.stored_draft_tab_ids.map(tabId => {
-              const tab = draft_tabs[tabId];
-              if (!tab) return null;
-              
-              return (
-                <div key={tab.id} className="draft-tab-card card">
-                  <div className="tab-header">
-                    <h4 className="tab-title">
-                      Banked: {tab.timeline.length > 0 ? tab.timeline[0].text.substring(0, 30) : 'Empty tab'}
-                      {tab.timeline[0]?.text.length > 30 ? '...' : ''}
-                    </h4>
-                    <div className="tab-meta">
-                      <span className="tab-stats">
-                        {tab.timeline.length} events
-                        {tab.descriptions.length > 0 && `, ${tab.descriptions.length} notes`}
-                      </span>
+              <DndContext 
+                collisionDetection={closestCenter}
+                onDragEnd={handleIdeaBankDragEnd}
+              >
+                <SortableContext 
+                  items={ideaBankTabIds}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {ideaBankTabs.map(tab => (
+                    <SortableIdeaBankTab 
+                      key={tab.id} 
+                      tab={tab} 
+                      scenes={scenes} 
+                      openModal={openModal} 
+                      moveTabFromIdeaBank={moveTabFromIdeaBank} 
+                      moveTabToWorkbench={moveTabToWorkbench} 
+                      deleteDraftTab={deleteDraftTab} 
+                      active_scene_id={active_scene_id} 
+                    />
+                  ))}
+                  
+                  {ideaBankTabs.length === 0 && (
+                    <div className="empty-state">
+                      <p className="text-muted">
+                        No tabs in idea bank. Use "Move to Bank" to store draft tabs here without deleting them.
+                      </p>
                     </div>
-                  </div>
-                  
-                  {/* Timeline Preview */}
-                  <div className="tab-content-preview">
-                    {tab.timeline.length > 0 ? (
-                      <div className="timeline-preview">
-                        {tab.timeline.slice(0, 2).map((event, index) => (
-                          <div key={event.id} className="timeline-event-preview">
-                            <span className="event-text">{event.text}</span>
-                            {event.dialogue && (
-                              <span className="event-dialogue">
-                                <MessageSquare size={12} />
-                                "{event.dialogue.length > 25 ? 
-                                  `${event.dialogue.substring(0, 25)}...` : 
-                                  event.dialogue}"
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                        {tab.timeline.length > 2 && (
-                          <div className="timeline-more text-sm text-muted">
-                            +{tab.timeline.length - 2} more events
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-muted">Empty timeline</p>
-                    )}
-                  </div>
-                  
-                  <div className="tab-actions">
-                    <button 
-                      className="button button-secondary"
-                      onClick={() => openModal('tab', tab.id)}
-                    >
-                      <Edit size={14} />
-                      Edit
-                    </button>
-                    
-                    {active_scene_id && (
-                      <button 
-                        className="button button-secondary"
-                        onClick={() => moveTabFromIdeaBank(tab.id, active_scene_id)}
-                      >
-                        <PlayCircle size={14} />
-                        Add to Scene
-                      </button>
-                    )}
-                    
-                    <button 
-                      className="button button-secondary"
-                      onClick={() => moveTabFromIdeaBank(tab.id)}
-                    >
-                      <Edit size={14} />
-                      Move to Workbench
-                    </button>
-                    
-                    <button 
-                      className="button button-danger"
-                      onClick={() => deleteDraftTab(tab.id)}
-                    >
-                      <Trash2 size={14} />
-                      Delete
-                    </button>
-                  </div>
-                  
-                  <div className="tab-meta text-xs text-muted">
-                    Banked from: {tab.scene_id ? scenes[tab.scene_id]?.name || 'Unknown Scene' : 'Workbench'}
-                  </div>
-                </div>
-              );
-            })}
-            
-            {idea_bank.stored_draft_tab_ids.length === 0 && (
-              <div className="empty-state">
-                <p className="text-muted">
-                  No tabs in idea bank. Use "Move to Bank" to store draft tabs here without deleting them.
-                </p>
-              </div>
-            )}
+                  )}
+                </SortableContext>
+              </DndContext>
             </div>
           )}
         </div>
