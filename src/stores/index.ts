@@ -30,6 +30,10 @@ interface AppStore extends AppState {
   getWorkbenchTabs: () => DraftTab[];
   getIdeaBankTabs: () => DraftTab[];
   
+  // Debugging and validation utilities
+  validateDraftTabConsistency: () => { errors: string[]; warnings: string[] };
+  getTabLocation: (tabId: string) => 'scene' | 'workbench' | 'idea_bank' | 'nowhere' | null;
+  
   // === SCENE ACTIONS ===
   createScene: (name: string) => string; // returns scene ID
   updateScene: (id: string, updates: Partial<Scene>) => void;
@@ -48,11 +52,24 @@ interface AppStore extends AppState {
   deleteDescription: (tabId: string, descId: string) => void;
   
   // === SCENE FLOW ACTIONS ===
+  
+  // Atomic action: Move tab from any location to a specific scene
+  moveDraftTabToScene: (tabId: string, sceneId: string) => void;
+  // Atomic action: Move tab from any location to idea bank
+  moveDraftTabToIdeaBank: (tabId: string) => void;
+  // Atomic action: Move tab from any location to workbench
+  moveDraftTabToWorkbench: (tabId: string) => void;
+
+  // Reorder tabs within a scene
+  reorderSceneTabs: (sceneId: string, newOrder: string[]) => void;
+  // Reorder tabs within workbench
+  reorderWorkbenchTabs: (newOrder: string[]) => void;
+  // Reorder tabs within idea bank
+  reorderIdeaBankTabs: (newOrder: string[]) => void;
+
+  // Legacy methods for backward compatibility (deprecated)
   addTabToScene: (tabId: string, sceneId: string) => void;
   removeTabFromScene: (tabId: string) => void;
-  reorderSceneTabs: (sceneId: string, fromIndex: number, toIndex: number) => void;
-  reorderWorkbenchTabs: (fromIndex: number, toIndex: number) => void;
-  reorderIdeaBankTabs: (fromIndex: number, toIndex: number) => void;
   moveTabToIdeaBank: (tabId: string) => void;
   moveTabFromIdeaBank: (tabId: string, sceneId: string) => void;
   moveTabToWorkbench: (tabId: string) => void;
@@ -279,6 +296,94 @@ export const useAppStore = create<AppStore>((set, get) => ({
       .filter(Boolean);
   },
 
+  // Debugging and validation utilities
+  validateDraftTabConsistency: () => {
+    const state = get();
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Check for tabs that exist in draft_tabs but not in any location
+    Object.values(state.draft_tabs).forEach(tab => {
+      if (!tab.id) {
+        errors.push(`Draft tab with missing ID: ${JSON.stringify(tab)}`);
+        return;
+      }
+
+      const isInScene = tab.scene_id && state.scenes[tab.scene_id]?.draft_tab_ids.includes(tab.id);
+      const isInWorkbench = state.workbench.unassigned_draft_tab_ids.includes(tab.id);
+      const isInIdeaBank = state.idea_bank.stored_draft_tab_ids.includes(tab.id);
+
+      // Check for tabs not in any location
+      if (!isInScene && !isInWorkbench && !isInIdeaBank) {
+        warnings.push(`Draft tab ${tab.id} exists but is not in any location`);
+      }
+
+      // Check for tabs in multiple locations (shouldn't happen with atomic actions)
+      const locationCount = [isInScene, isInWorkbench, isInIdeaBank].filter(Boolean).length;
+      if (locationCount > 1) {
+        errors.push(`Draft tab ${tab.id} is in ${locationCount} locations simultaneously`);
+      }
+
+      // Check for scene_id mismatch
+      if (tab.scene_id && !state.scenes[tab.scene_id]) {
+        errors.push(`Draft tab ${tab.id} references non-existent scene: ${tab.scene_id}`);
+      }
+
+      // Check for tabs with scene_id but not in that scene's list
+      if (tab.scene_id && state.scenes[tab.scene_id] && !isInScene) {
+        errors.push(`Draft tab ${tab.id} has scene_id ${tab.scene_id} but is not in that scene's draft_tab_ids`);
+      }
+
+      // Check for tabs in scene list but with wrong scene_id
+      if (isInScene && tab.scene_id) {
+        const scene = state.scenes[tab.scene_id];
+        if (scene && !scene.draft_tab_ids.includes(tab.id)) {
+          errors.push(`Draft tab ${tab.id} is in scene ${tab.scene_id} but not in its draft_tab_ids`);
+        }
+      }
+    });
+
+    // Check for tabs in location lists that don't exist in draft_tabs
+    state.workbench.unassigned_draft_tab_ids.forEach(tabId => {
+      if (!state.draft_tabs[tabId]) {
+        errors.push(`Workbench contains non-existent tab: ${tabId}`);
+      }
+    });
+
+    state.idea_bank.stored_draft_tab_ids.forEach(tabId => {
+      if (!state.draft_tabs[tabId]) {
+        errors.push(`Idea bank contains non-existent tab: ${tabId}`);
+      }
+    });
+
+    Object.values(state.scenes).forEach(scene => {
+      scene.draft_tab_ids.forEach(tabId => {
+        if (!state.draft_tabs[tabId]) {
+          errors.push(`Scene ${scene.id} contains non-existent tab: ${tabId}`);
+        }
+      });
+    });
+
+    return { errors, warnings };
+  },
+
+  getTabLocation: (tabId: string) => {
+    const state = get();
+    const tab = state.draft_tabs[tabId];
+    if (!tab) return null;
+
+    if (tab.scene_id && state.scenes[tab.scene_id]?.draft_tab_ids.includes(tabId)) {
+      return 'scene';
+    }
+    if (state.workbench.unassigned_draft_tab_ids.includes(tabId)) {
+      return 'workbench';
+    }
+    if (state.idea_bank.stored_draft_tab_ids.includes(tabId)) {
+      return 'idea_bank';
+    }
+    return 'nowhere';
+  },
+
   // === SCENE ACTIONS ===
   
   createScene: (name: string) => {
@@ -484,137 +589,287 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   // === SCENE FLOW ACTIONS ===
   
-  addTabToScene: (tabId: string, sceneId: string) => {
-    const scene = get().scenes[sceneId];
-    const tab = get().draft_tabs[tabId];
-    if (!scene || !tab) return;
+  // Atomic action: Move tab from any location to a specific scene
+  moveDraftTabToScene: (tabId: string, sceneId: string) => {
+    const state = get();
+    const tab = state.draft_tabs[tabId];
+    const scene = state.scenes[sceneId];
+    
+    if (!tab) {
+      console.error("Tab does not exist:", tabId);
+      return;
+    }
+    
+    if (!scene) {
+      console.error("Scene does not exist:", sceneId);
+      return;
+    }
+    
+    // Check if tab is already in the target scene
+    if (scene.draft_tab_ids.includes(tabId)) {
+      console.warn("Tab already in scene:", tabId);
+      return;
+    }
 
-    // Remove from workbench and idea bank
-    set(state => ({
+    // Debug: Log current location before move
+    if (process.env.NODE_ENV === 'development') {
+      const currentLocation = get().getTabLocation(tabId);
+      console.log(`Moving tab ${tabId} from ${currentLocation} to scene ${sceneId}`);
+    }
+    
+    // Remove from all possible sources
+    const newState = { ...state };
+    
+    // Remove from current scene if any
+    if (tab.scene_id && newState.scenes[tab.scene_id]) {
+      newState.scenes[tab.scene_id] = {
+        ...newState.scenes[tab.scene_id],
+        draft_tab_ids: newState.scenes[tab.scene_id].draft_tab_ids.filter(id => id !== tabId),
+        updated_at: Date.now()
+      };
+    }
+    
+    // Remove from workbench
+    newState.workbench = {
+      ...newState.workbench,
+      unassigned_draft_tab_ids: newState.workbench.unassigned_draft_tab_ids.filter(id => id !== tabId)
+    };
+    
+    // Remove from idea bank
+    newState.idea_bank = {
+      ...newState.idea_bank,
+      stored_draft_tab_ids: newState.idea_bank.stored_draft_tab_ids.filter(id => id !== tabId)
+    };
+    
+    // Add to target scene
+    newState.scenes[sceneId] = {
+      ...newState.scenes[sceneId],
+      draft_tab_ids: [...newState.scenes[sceneId].draft_tab_ids, tabId],
+      updated_at: Date.now()
+    };
+    
+    // Update tab metadata
+    newState.draft_tabs[tabId] = {
+      ...newState.draft_tabs[tabId],
+      scene_id: sceneId,
+      index: newState.scenes[sceneId].draft_tab_ids.length - 1,
+      updated_at: Date.now()
+    };
+    
+    set(newState);
+  },
+
+  // Atomic action: Move tab from any location to idea bank
+  moveDraftTabToIdeaBank: (tabId: string) => {
+    const state = get();
+    const tab = state.draft_tabs[tabId];
+    
+    if (!tab) {
+      console.error("Tab does not exist:", tabId);
+      return;
+    }
+    
+    // Check if tab is already in idea bank
+    if (state.idea_bank.stored_draft_tab_ids.includes(tabId)) {
+      console.warn("Tab already in idea bank:", tabId);
+      return;
+    }
+    
+    // Remove from all possible sources
+    const newState = { ...state };
+    
+    // Remove from current scene if any
+    if (tab.scene_id && newState.scenes[tab.scene_id]) {
+      newState.scenes[tab.scene_id] = {
+        ...newState.scenes[tab.scene_id],
+        draft_tab_ids: newState.scenes[tab.scene_id].draft_tab_ids.filter(id => id !== tabId),
+        updated_at: Date.now()
+      };
+    }
+    
+    // Remove from workbench
+    newState.workbench = {
+      ...newState.workbench,
+      unassigned_draft_tab_ids: newState.workbench.unassigned_draft_tab_ids.filter(id => id !== tabId)
+    };
+    
+    // Add to idea bank
+    newState.idea_bank = {
+      ...newState.idea_bank,
+      stored_draft_tab_ids: [...newState.idea_bank.stored_draft_tab_ids, tabId]
+    };
+    
+    // Update tab metadata
+    newState.draft_tabs[tabId] = {
+      ...newState.draft_tabs[tabId],
+      scene_id: undefined,
+      index: 0,
+      updated_at: Date.now()
+    };
+    
+    set(newState);
+  },
+
+  // Atomic action: Move tab from any location to workbench
+  moveDraftTabToWorkbench: (tabId: string) => {
+    const state = get();
+    const tab = state.draft_tabs[tabId];
+    
+    if (!tab) {
+      console.error("Tab does not exist:", tabId);
+      return;
+    }
+    
+    // Check if tab is already in workbench
+    if (state.workbench.unassigned_draft_tab_ids.includes(tabId)) {
+      console.warn("Tab already in workbench:", tabId);
+      return;
+    }
+    
+    // Remove from all possible sources
+    const newState = { ...state };
+    
+    // Remove from current scene if any
+    if (tab.scene_id && newState.scenes[tab.scene_id]) {
+      newState.scenes[tab.scene_id] = {
+        ...newState.scenes[tab.scene_id],
+        draft_tab_ids: newState.scenes[tab.scene_id].draft_tab_ids.filter(id => id !== tabId),
+        updated_at: Date.now()
+      };
+    }
+    
+    // Remove from idea bank
+    newState.idea_bank = {
+      ...newState.idea_bank,
+      stored_draft_tab_ids: newState.idea_bank.stored_draft_tab_ids.filter(id => id !== tabId)
+    };
+    
+    // Add to workbench
+    newState.workbench = {
+      ...newState.workbench,
+      unassigned_draft_tab_ids: [...newState.workbench.unassigned_draft_tab_ids, tabId]
+    };
+    
+    // Update tab metadata
+    newState.draft_tabs[tabId] = {
+      ...newState.draft_tabs[tabId],
+      scene_id: undefined,
+      index: 0,
+      updated_at: Date.now()
+    };
+    
+    set(newState);
+  },
+
+  // Reorder tabs within a scene
+  reorderSceneTabs: (sceneId: string, newOrder: string[]) => {
+    const state = get();
+    const scene = state.scenes[sceneId];
+    
+    if (!scene) {
+      console.error("Scene does not exist:", sceneId);
+      return;
+    }
+    
+    // Validate that all tabs in new order exist and belong to this scene
+    const validTabs = newOrder.filter(tabId => 
+      state.draft_tabs[tabId] && state.draft_tabs[tabId].scene_id === sceneId
+    );
+    
+    if (validTabs.length !== newOrder.length) {
+      console.warn("Some tabs in reorder array are invalid or don't belong to scene");
+    }
+    
+    // Update scene with new order
+    const newState = { ...state };
+    newState.scenes[sceneId] = {
+      ...newState.scenes[sceneId],
+      draft_tab_ids: validTabs,
+      updated_at: Date.now()
+    };
+    
+    // Update tab indices
+    validTabs.forEach((tabId, index) => {
+      newState.draft_tabs[tabId] = {
+        ...newState.draft_tabs[tabId],
+        index,
+        updated_at: Date.now()
+      };
+    });
+    
+    set(newState);
+  },
+
+  // Reorder tabs within workbench
+  reorderWorkbenchTabs: (newOrder: string[]) => {
+    const state = get();
+    
+    // Validate that all tabs in new order exist and are in workbench
+    const validTabs = newOrder.filter(tabId => 
+      state.draft_tabs[tabId] && !state.draft_tabs[tabId].scene_id && 
+      state.workbench.unassigned_draft_tab_ids.includes(tabId)
+    );
+    
+    if (validTabs.length !== newOrder.length) {
+      console.warn("Some tabs in reorder array are invalid or not in workbench");
+    }
+    
+    set({
       workbench: {
         ...state.workbench,
-        unassigned_draft_tab_ids: state.workbench.unassigned_draft_tab_ids.filter(id => id !== tabId)
-      },
+        unassigned_draft_tab_ids: validTabs
+      }
+    });
+  },
+
+  // Reorder tabs within idea bank
+  reorderIdeaBankTabs: (newOrder: string[]) => {
+    const state = get();
+    
+    // Validate that all tabs in new order exist and are in idea bank
+    const validTabs = newOrder.filter(tabId => 
+      state.draft_tabs[tabId] && 
+      state.idea_bank.stored_draft_tab_ids.includes(tabId)
+    );
+    
+    if (validTabs.length !== newOrder.length) {
+      console.warn("Some tabs in reorder array are invalid or not in idea bank");
+    }
+    
+    set({
       idea_bank: {
         ...state.idea_bank,
-        stored_draft_tab_ids: state.idea_bank.stored_draft_tab_ids.filter(id => id !== tabId)
+        stored_draft_tab_ids: validTabs
       }
-    }));
-
-    // Update tab's scene and index
-    get().updateDraftTab(tabId, {
-      scene_id: sceneId,
-      index: scene.draft_tab_ids.length
     });
+  },
 
-    // Add to scene
-    get().updateScene(sceneId, {
-      draft_tab_ids: [...scene.draft_tab_ids, tabId]
-    });
+  // Legacy methods for backward compatibility (deprecated)
+  addTabToScene: (tabId: string, sceneId: string) => {
+    console.warn("addTabToScene is deprecated, use moveDraftTabToScene instead");
+    get().moveDraftTabToScene(tabId, sceneId);
   },
 
   removeTabFromScene: (tabId: string) => {
-    const tab = get().draft_tabs[tabId];
-    if (!tab || !tab.scene_id) return;
-
-    const scene = get().scenes[tab.scene_id];
-    if (!scene) return;
-
-    // Remove from scene
-    const updatedTabIds = scene.draft_tab_ids.filter(id => id !== tabId);
-    
-    // Reindex remaining tabs
-    updatedTabIds.forEach((id, index) => {
-      get().updateDraftTab(id, { index });
-    });
-
-    get().updateScene(tab.scene_id, {
-      draft_tab_ids: updatedTabIds
-    });
-
-    // Update tab to remove scene assignment
-    get().updateDraftTab(tabId, {
-      scene_id: undefined,
-      index: 0
-    });
-  },
-
-  reorderSceneTabs: (sceneId: string, fromIndex: number, toIndex: number) => {
-    const scene = get().scenes[sceneId];
-    if (!scene) return;
-
-    const newTabIds = [...scene.draft_tab_ids];
-    const [movedTabId] = newTabIds.splice(fromIndex, 1);
-    newTabIds.splice(toIndex, 0, movedTabId);
-
-    // Update all tab indices
-    newTabIds.forEach((tabId, index) => {
-      get().updateDraftTab(tabId, { index });
-    });
-
-    get().updateScene(sceneId, {
-      draft_tab_ids: newTabIds
-    });
-  },
-
-  reorderWorkbenchTabs: (fromIndex: number, toIndex: number) => {
-    const state = get();
-    const tabIds = [...state.workbench.unassigned_draft_tab_ids];
-    if (tabIds.length < 2) return;
-
-    const [movedTabId] = tabIds.splice(fromIndex, 1);
-    tabIds.splice(toIndex, 0, movedTabId);
-
-    set(state => ({
-      workbench: {
-        ...state.workbench,
-        unassigned_draft_tab_ids: tabIds
-      }
-    }));
-  },
-
-  reorderIdeaBankTabs: (fromIndex: number, toIndex: number) => {
-    const state = get();
-    const tabIds = [...state.idea_bank.stored_draft_tab_ids];
-    if (tabIds.length < 2) return;
-
-    const [movedTabId] = tabIds.splice(fromIndex, 1);
-    tabIds.splice(toIndex, 0, movedTabId);
-
-    set(state => ({
-      idea_bank: {
-        ...state.idea_bank,
-        stored_draft_tab_ids: tabIds
-      }
-    }));
+    console.warn("removeTabFromScene is deprecated, use moveDraftTabToWorkbench or moveDraftTabToIdeaBank instead");
+    get().moveDraftTabToWorkbench(tabId);
   },
 
   moveTabToIdeaBank: (tabId: string) => {
-    get().removeTabFromScene(tabId);
-    
-    set(state => ({
-      idea_bank: {
-        ...state.idea_bank,
-        stored_draft_tab_ids: [...state.idea_bank.stored_draft_tab_ids, tabId]
-      }
-    }));
+    console.warn("moveTabToIdeaBank is deprecated, use moveDraftTabToIdeaBank instead");
+    get().moveDraftTabToIdeaBank(tabId);
   },
 
   moveTabFromIdeaBank: (tabId: string, sceneId: string) => {
-    get().addTabToScene(tabId, sceneId);
+    console.warn("moveTabFromIdeaBank is deprecated, use moveDraftTabToScene instead");
+    get().moveDraftTabToScene(tabId, sceneId);
   },
 
   moveTabToWorkbench: (tabId: string) => {
-    get().removeTabFromScene(tabId);
-    
-    set(state => ({
-      workbench: {
-        ...state.workbench,
-        unassigned_draft_tab_ids: [...state.workbench.unassigned_draft_tab_ids, tabId]
-      }
-    }));
+    console.warn("moveTabToWorkbench is deprecated, use moveDraftTabToWorkbench instead");
+    get().moveDraftTabToWorkbench(tabId);
   },
-
+  
   // === STAR ACTIONS ===
   
   createStar: (star: Omit<Star, 'id' | 'created_at'>) => {

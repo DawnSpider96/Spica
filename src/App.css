@@ -537,6 +537,13 @@ body {
 .scene-item {
   margin-bottom: 0.75rem;
   position: relative;
+  cursor: default;
+}
+
+.scene-item[data-dragging="true"] {
+  z-index: 1000;
+  transform: rotate(2deg);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
 }
 
 .scene-item-header {
