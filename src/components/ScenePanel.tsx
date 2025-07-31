@@ -42,6 +42,7 @@ const SceneItem: React.FC<SceneItemProps> = ({ tabId, index }) => {
           className="drag-handle"
           {...attributes}
           {...listeners}
+          style={{ cursor: 'grab' }} // Added cursor styling for better UX
         >
           <GripVertical size={16} />
         </div>
@@ -129,16 +130,16 @@ export const ScenePanel: React.FC = () => {
 
   const activeScene = active_scene_id ? scenes[active_scene_id] : null;
   const sceneTabs = activeScene ? getDraftTabsForScene(activeScene.id) : [];
-  const sceneTabIds = activeScene ? activeScene.draft_tab_ids : [];
+  const sceneTabIds = sceneTabs.map(tab => tab.id); // Fixed: derive IDs from filtered tabs
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
-    if (over && active.id !== over.id && active_scene_id) {
+    if (over && active.id !== over.id) { // Removed unnecessary && active_scene_id check
       const oldIndex = sceneTabIds.indexOf(active.id as string);
       const newIndex = sceneTabIds.indexOf(over.id as string);
       
-      reorderSceneTabs(active_scene_id, oldIndex, newIndex);
+      reorderSceneTabs(active_scene_id!, oldIndex, newIndex); // Use ! since we know it exists
     }
   };
 
