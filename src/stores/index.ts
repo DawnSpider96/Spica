@@ -216,6 +216,25 @@ const repairProjectData = (data: Partial<ProjectData>): ProjectData => {
     }
   });
 
+  // Ensure timeline events have checked field (default to true for backward compatibility)
+  Object.values(repaired.draft_tabs).forEach(tab => {
+    tab.timeline.forEach(event => {
+      if (event.checked === undefined) {
+        event.checked = true; // Default to checked for existing events
+      }
+    });
+    
+    // Ensure descriptions have scope and target_event_id fields (backward compatibility)
+    tab.descriptions.forEach(desc => {
+      if (desc.scope === undefined) {
+        desc.scope = 'tab'; // Default to tab scope for existing descriptions
+      }
+      if (desc.target_event_id === undefined) {
+        desc.target_event_id = undefined; // Explicitly set to undefined
+      }
+    });
+  });
+
   // Ensure we have an active scene
   if (!repaired.active_scene_id || !repaired.scenes[repaired.active_scene_id]) {
     const sceneIds = Object.keys(repaired.scenes);
@@ -341,6 +360,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
           errors.push(`Draft tab ${tab.id} is in scene ${tab.scene_id} but not in its draft_tab_ids`);
         }
       }
+
+      // Check for required fields
+      if (!tab.timeline) {
+        errors.push(`Draft tab ${tab.id} is missing timeline field`);
+      }
+      if (!tab.descriptions) {
+        errors.push(`Draft tab ${tab.id} is missing descriptions field`);
+      }
+      if (!tab.fulfilled_plan_steps) {
+        errors.push(`Draft tab ${tab.id} is missing fulfilled_plan_steps field`);
+      }
+      if (!tab.suggested_plan_steps) {
+        errors.push(`Draft tab ${tab.id} is missing suggested_plan_steps field`);
+      }
     });
 
     // Check for tabs in location lists that don't exist in draft_tabs
@@ -431,6 +464,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       timeline: [],
       descriptions: [],
       summary: '',
+      atmosphere: undefined, // Optional field - will be populated by LLM
       fulfilled_plan_steps: [],
       suggested_plan_steps: [],
       created_at: Date.now(),
@@ -527,7 +561,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const newEvent: TimelineEvent = {
       ...event,
-      id: uuidv4()
+      id: uuidv4(),
+      checked: event.checked ?? true // Default to checked
     };
 
     get().updateDraftTab(tabId, {
@@ -551,6 +586,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!tab) return;
 
     const updatedTimeline = tab.timeline.filter(event => event.id !== eventId);
+    
+    // Also remove any descriptions that target this deleted event
+    const updatedDescriptions = tab.descriptions.filter(desc => 
+      desc.target_event_id !== eventId
+    );
+    
+    get().updateDraftTab(tabId, { 
+      timeline: updatedTimeline,
+      descriptions: updatedDescriptions
+    });
+  },
+
+  toggleTimelineEvent: (tabId: string, eventId: string) => {
+    const tab = get().draft_tabs[tabId];
+    if (!tab) return;
+
+    const updatedTimeline = tab.timeline.map(event =>
+      event.id === eventId ? { ...event, checked: !event.checked } : event
+    );
+
     get().updateDraftTab(tabId, { timeline: updatedTimeline });
   },
 
@@ -560,7 +615,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const newDescription: Description = {
       ...description,
-      id: uuidv4()
+      id: uuidv4(),
+      scope: description.scope || 'tab', // Default to tab scope
+      target_event_id: description.target_event_id || undefined
     };
 
     get().updateDraftTab(tabId, {
@@ -586,6 +643,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const updatedDescriptions = tab.descriptions.filter(desc => desc.id !== descId);
     get().updateDraftTab(tabId, { descriptions: updatedDescriptions });
   },
+
+
 
   // === SCENE FLOW ACTIONS ===
   
@@ -1242,10 +1301,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
         const tabId = createDraftTab(undefined, tab.title);
         console.log('Created draft tab:', tabId, tab.title);
         
-        // Update the summary if provided by LLM
+        // Update the summary and atmosphere if provided by LLM
+        const updates: Partial<DraftTab> = {};
         if (tab.summary) {
-          get().updateDraftTab(tabId, { summary: tab.summary });
+          updates.summary = tab.summary;
           console.log('Set summary for draft tab:', tabId, tab.summary);
+        }
+        if (tab.atmosphere) {
+          updates.atmosphere = tab.atmosphere;
+          console.log('Set atmosphere for draft tab:', tabId, tab.atmosphere);
+        }
+        if (Object.keys(updates).length > 0) {
+          get().updateDraftTab(tabId, updates);
         }
         
         // Add timeline events
@@ -1253,7 +1320,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
           get().addTimelineEvent(tabId, {
             text: event.text,
             dialogue: event.dialogue,
-            associated_stars: []
+            associated_stars: [],
+            checked: true // LLM-generated events are checked by default
           });
         });
       });

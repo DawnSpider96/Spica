@@ -34,6 +34,11 @@ export const PROMPT_CONFIGS: Record<string, PromptConfig> = {
     userPromptTemplateKey: 'SCENE_TIMELINE_TEMPLATE',
     responseInstructionKey: 'SCENE_TIMELINE_INSTRUCTIONS'
   },
+  EVENT_DESCRIPTION: {
+    systemPromptKey: 'EVENT_DESCRIPTION_GENERATOR',
+    userPromptTemplateKey: 'EVENT_DESCRIPTION_TEMPLATE',
+    responseInstructionKey: 'EVENT_DESCRIPTION_INSTRUCTIONS'
+  },
   // Future prompt types can be added here:
   // CHARACTER_DEVELOPMENT: { ... },
   // DIALOGUE_ENHANCEMENT: { ... },
@@ -47,6 +52,7 @@ export interface ContextParams {
   characters: Character[];
   checkedStars: Star[];
   recentTabs: DraftTab[];
+  targetEvent?: string; // Optional target event for description generation
 }
 
 /**
@@ -101,10 +107,12 @@ export class LLMService {
       
       // Add full timeline content for recent tabs (chronological order)
       lastThreeTabs.forEach((tab) => {
-        tab.timeline.forEach(event => {
-          const dialoguePart = event.dialogue ? ` -> "${event.dialogue}"` : '';
-          context += `- ${event.text}${dialoguePart}\n`;
-        });
+        tab.timeline
+          .filter(event => event.checked) // Only include checked events
+          .forEach(event => {
+            const dialoguePart = event.dialogue ? ` -> "${event.dialogue}"` : '';
+            context += `- ${event.text}${dialoguePart}\n`;
+          });
       });
       
       context += '\n';
@@ -169,7 +177,8 @@ export class LLMService {
   static assemblePrompt(
     promptType: string, 
     userInput: string, 
-    context: string
+    context: string,
+    targetEvent?: string
   ): { systemPrompt: string; userPrompt: string } {
     const config = PROMPT_CONFIGS[promptType];
     if (!config) {
@@ -180,10 +189,15 @@ export class LLMService {
     const userPromptTemplate = USER_PROMPT_TEMPLATES[config.userPromptTemplateKey];
     const responseInstructions = RESPONSE_INSTRUCTIONS[config.responseInstructionKey];
     
-    const userPrompt = userPromptTemplate
+    let userPrompt = userPromptTemplate
       .replace('{context}', context)
       .replace('{userInput}', userInput)
       .replace('{responseInstructions}', responseInstructions);
+
+    // Handle targetEvent replacement for description generation
+    if (targetEvent) {
+      userPrompt = userPrompt.replace('{targetEvent}', targetEvent);
+    }
 
     return { systemPrompt, userPrompt };
   }
@@ -199,7 +213,7 @@ export class LLMService {
     console.log('LLMService.sendPrompt called with:', { promptType, userInput: userInput.substring(0, 100) + '...' });
     
     const context = this.buildContext(contextParams);
-    const { systemPrompt, userPrompt } = this.assemblePrompt(promptType, userInput, context);
+    const { systemPrompt, userPrompt } = this.assemblePrompt(promptType, userInput, context, contextParams.targetEvent);
 
     console.log('Assembled prompts:', { 
       systemPrompt: systemPrompt.substring(0, 100) + '...',
@@ -230,5 +244,40 @@ export class LLMService {
     contextParams: ContextParams
   ): Promise<LLMResponse> {
     return this.sendPrompt('SCENE_TIMELINE', userInput, contextParams);
+  }
+
+  /**
+   * Convenience method for event description generation
+   */
+  static async generateEventDescription(
+    targetEvent: { text: string; dialogue?: string },
+    userInput: string,
+    contextParams: ContextParams
+  ): Promise<{ description: string }> {
+    const targetEventText = `${targetEvent.text}${targetEvent.dialogue ? ` -> "${targetEvent.dialogue}"` : ''}`;
+    
+    // Build context and assemble prompt
+    const context = this.buildContext(contextParams);
+    const { systemPrompt, userPrompt } = this.assemblePrompt('EVENT_DESCRIPTION', userInput, context, targetEventText);
+
+    console.log('Generating description with prompts:', { 
+      systemPrompt: systemPrompt.substring(0, 100) + '...',
+      userPrompt: userPrompt.substring(0, 200) + '...'
+    });
+
+    // Call the new Tauri command for description generation
+    const response = await invoke('generate_description', { 
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt 
+    }) as string | ApiError;
+    
+    console.log('Description generation response:', response);
+    
+    if (typeof response === 'object' && 'error' in response) {
+      throw new Error(`LLM Error: ${(response as ApiError).message}`);
+    }
+
+    // Return the raw string response as the description
+    return { description: response as string };
   }
 } 

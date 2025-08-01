@@ -75,6 +75,7 @@ struct ErrorDetails {
 pub struct TimelineEvent {
     pub text: String,
     pub dialogue: Option<String>,
+    pub checked: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -82,6 +83,7 @@ pub struct LLMTab {
     pub title: String,
     pub timeline: Vec<TimelineEvent>,
     pub summary: Option<String>,
+    pub atmosphere: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -106,7 +108,7 @@ impl OpenAIClient {
             api_key,
             base_url: "https://api.openai.com/v1".to_string(),
             // model: "gpt-4o-mini".to_string(),
-            model: "gpt-4o".to_string(),
+            model: "gpt-4.1".to_string(),
         })
     }
 

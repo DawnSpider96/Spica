@@ -7,6 +7,7 @@ export interface TimelineEvent {
   text: string;
   dialogue?: string;
   associated_stars: string[]; // Star IDs
+  checked: boolean; // Whether this event should be included in LLM context
 }
 
 export interface Description {
@@ -14,6 +15,8 @@ export interface Description {
   text: string;
   is_important: boolean;
   origin_star_id?: string; // Star ID
+  target_event_id?: string; // Optional - if null, describes whole tab
+  scope: 'event' | 'tab'; // Whether this description targets a specific event or the whole tab
 }
 
 export interface DraftTab {
@@ -23,6 +26,7 @@ export interface DraftTab {
   timeline: TimelineEvent[];
   descriptions: Description[];
   summary?: string; // LLM-generated
+  atmosphere?: string; // LLM-generated atmosphere description
   fulfilled_plan_steps: string[]; // PlanStep IDs
   suggested_plan_steps: string[]; // e.g., ["Reveal letter's origin"]
   created_at: number;
@@ -142,6 +146,7 @@ export interface LLMResponse {
       dialogue?: string;
     }>;
     summary?: string;
+    atmosphere?: string;
   }>;
 }
 

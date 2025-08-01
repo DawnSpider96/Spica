@@ -26,6 +26,7 @@ struct DraftTab {
     timeline: Vec<TimelineEvent>,
     descriptions: Vec<Description>,
     summary: Option<String>,
+    atmosphere: Option<String>,
     fulfilled_plan_steps: Vec<String>,
     suggested_plan_steps: Vec<String>,
     created_at: u64,
@@ -149,83 +150,103 @@ impl AppConfig {
     }
 }
 
-// Parse LLM response into timeline events and extract summary
-fn parse_response(response: &str) -> (Vec<TimelineEvent>, Option<String>) {
+// Parse LLM response into timeline events and extract summary and atmosphere
+fn parse_response(response: &str) -> (Vec<TimelineEvent>, Option<String>, Option<String>) {
     let mut timeline = Vec::new();
     let mut summary: Option<String> = None;
+    let mut atmosphere: Option<String> = None;
     
-    // Extract summary from between pipes (|summary text|)
+    // Extract summary and atmosphere from between pipes (|Summary|Atmosphere|)
     if let Some(first_pipe) = response.rfind('|') {
-        if let Some(second_pipe) = response[..first_pipe].rfind('|') {
-            let summary_text = response[second_pipe + 1..first_pipe].trim();
-            if !summary_text.is_empty() {
-                summary = Some(summary_text.to_string());
-            }
-            
-            // Process only the content before the summary
-            let content_without_summary = &response[..second_pipe];
-            
-            for line in content_without_summary.lines() {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
+        if let Some(third_pipe) = response[..first_pipe].rfind('|') {
+            if let Some(second_pipe) = response[..third_pipe].rfind('|') {
+                let summary_text = response[second_pipe + 1..third_pipe].trim();
+                let atmosphere_text = response[third_pipe + 1..first_pipe].trim();
+                
+                if !summary_text.is_empty() {
+                    summary = Some(summary_text.to_string());
+                }
+                if !atmosphere_text.is_empty() {
+                    atmosphere = Some(atmosphere_text.to_string());
                 }
                 
-                // Check if line contains dialogue (indicated by quotes)
-                if let Some(dialogue_start) = line.find('"') {
-                    if let Some(dialogue_end) = line.rfind('"') {
-                        if dialogue_start < dialogue_end {
-                            let text_part = line[..dialogue_start].trim();
-                            let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
-                            
-                            timeline.push(TimelineEvent {
-                                text: text_part.to_string(),
-                                dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
-                            });
-                            continue;
+                // Process only the content before the summary
+                let content_without_summary = &response[..second_pipe];
+            
+                for line in content_without_summary.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    
+                    // Check if line contains dialogue (indicated by quotes)
+                    if let Some(dialogue_start) = line.find('"') {
+                        if let Some(dialogue_end) = line.rfind('"') {
+                            if dialogue_start < dialogue_end {
+                                let text_part = line[..dialogue_start].trim();
+                                let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
+                                
+                                timeline.push(TimelineEvent {
+                                    text: text_part.to_string(),
+                                    dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
+                                    checked: true,
+                                });
+                                continue;
+                            }
                         }
                     }
+                    
+                    // Regular text event
+                    timeline.push(TimelineEvent {
+                        text: line.to_string(),
+                        dialogue: None,
+                        checked: true,
+                    });
+                }
+            } else {
+                // Fallback: only one pipe found, try to extract as summary only
+                let summary_text = response[..first_pipe].trim();
+                if !summary_text.is_empty() {
+                    summary = Some(summary_text.to_string());
                 }
                 
-                // Regular text event
-                timeline.push(TimelineEvent {
-                    text: line.to_string(),
-                    dialogue: None,
-                });
-            }
-        } else {
-            // Fallback: no summary found, process entire response as timeline
-            for line in response.lines() {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
+                // Process only the content before the summary
+                let content_without_summary = &response[..first_pipe];
                 
-                // Check if line contains dialogue (indicated by quotes)
-                if let Some(dialogue_start) = line.find('"') {
-                    if let Some(dialogue_end) = line.rfind('"') {
-                        if dialogue_start < dialogue_end {
-                            let text_part = line[..dialogue_start].trim();
-                            let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
-                            
-                            timeline.push(TimelineEvent {
-                                text: text_part.to_string(),
-                                dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
-                            });
-                            continue;
+                for line in content_without_summary.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    
+                    // Check if line contains dialogue (indicated by quotes)
+                    if let Some(dialogue_start) = line.find('"') {
+                        if let Some(dialogue_end) = line.rfind('"') {
+                            if dialogue_start < dialogue_end {
+                                let text_part = line[..dialogue_start].trim();
+                                let dialogue_part = line[dialogue_start + 1..dialogue_end].trim();
+                                
+                                timeline.push(TimelineEvent {
+                                    text: text_part.to_string(),
+                                    dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
+                                    checked: true,
+                                });
+                                continue;
+                            }
                         }
                     }
+                    
+                    // Regular text event
+                    timeline.push(TimelineEvent {
+                        text: line.to_string(),
+                        dialogue: None,
+                        checked: true,
+                    });
                 }
-                
-                // Regular text event
-                timeline.push(TimelineEvent {
-                    text: line.to_string(),
-                    dialogue: None,
-                });
             }
         }
-         } else {
-         // Fallback: no pipes found, process entire response as timeline
+    } else {
+        // Fallback: no pipes found, process entire response as timeline
         for line in response.lines() {
             let line = line.trim();
             if line.is_empty() {
@@ -242,6 +263,7 @@ fn parse_response(response: &str) -> (Vec<TimelineEvent>, Option<String>) {
                         timeline.push(TimelineEvent {
                             text: text_part.to_string(),
                             dialogue: if dialogue_part.is_empty() { None } else { Some(dialogue_part.to_string()) },
+                            checked: true,
                         });
                         continue;
                     }
@@ -252,6 +274,7 @@ fn parse_response(response: &str) -> (Vec<TimelineEvent>, Option<String>) {
             timeline.push(TimelineEvent {
                 text: line.to_string(),
                 dialogue: None,
+                checked: true,
             });
         }
     }
@@ -261,10 +284,11 @@ fn parse_response(response: &str) -> (Vec<TimelineEvent>, Option<String>) {
         timeline.push(TimelineEvent {
             text: response.trim().to_string(),
             dialogue: None,
+            checked: true,
         });
     }
     
-    (timeline, summary)
+    (timeline, summary, atmosphere)
 }
 
 // Tauri commands
@@ -272,14 +296,15 @@ fn parse_response(response: &str) -> (Vec<TimelineEvent>, Option<String>) {
 async fn send_prompt(system_prompt: String, user_prompt: String, state: State<'_, AppConfig>) -> Result<LLMResponse, ApiError> {
     match state.openai_client.send_prompt(&system_prompt, &user_prompt).await {
         Ok(response) => {
-            // Parse the response into timeline events and extract summary
-            let (timeline, summary) = parse_response(&response);
+            // Parse the response into timeline events and extract summary and atmosphere
+            let (timeline, summary, atmosphere) = parse_response(&response);
             
             let tabs = vec![
                 openai_client::LLMTab {
                     title: "Generated Scene Segment".to_string(),
                     timeline,
                     summary,
+                    atmosphere,
                 }
             ];
             
@@ -288,6 +313,21 @@ async fn send_prompt(system_prompt: String, user_prompt: String, state: State<'_
         Err(e) => Err(ApiError {
             error: true,
             message: format!("Failed to process prompt: {}", e),
+            code: Some("LLM_ERROR".to_string()),
+        })
+    }
+}
+
+#[tauri::command]
+async fn generate_description(system_prompt: String, user_prompt: String, state: State<'_, AppConfig>) -> Result<String, ApiError> {
+    match state.openai_client.send_prompt(&system_prompt, &user_prompt).await {
+        Ok(response) => {
+            // For description generation, return the raw response as a string
+            Ok(response)
+        }
+        Err(e) => Err(ApiError {
+            error: true,
+            message: format!("Failed to generate description: {}", e),
             code: Some("LLM_ERROR".to_string()),
         })
     }
@@ -442,6 +482,7 @@ fn main() {
         .manage(app_config)
         .invoke_handler(tauri::generate_handler![
             send_prompt,
+            generate_description,
             save_project,
             load_project,
             save_project_as,
@@ -450,4 +491,4 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-} 
+}

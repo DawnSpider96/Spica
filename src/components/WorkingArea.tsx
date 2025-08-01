@@ -89,6 +89,18 @@ const SortableWorkbenchTab: React.FC<SortableWorkbenchTabProps> = ({
             <p className="text-muted">No events yet</p>
           </div>
         )}
+        
+        {/* Atmosphere Preview */}
+        {tab.atmosphere && (
+          <div className="atmosphere-preview">
+            <span className="text-sm text-muted">Atmosphere: </span>
+            <span className="text-sm">
+              {tab.atmosphere.length > 60 ? 
+                `${tab.atmosphere.substring(0, 60)}...` : 
+                tab.atmosphere}
+            </span>
+          </div>
+        )}
       </div>
       
       <div className="tab-actions">
@@ -218,7 +230,7 @@ const SortableSceneTab: React.FC<SortableSceneTabProps> = ({
         {tab.timeline.length > 0 ? (
           <div className="timeline-preview">
             {tab.timeline.slice(0, 2).map((timelineEvent: any) => (
-              <div key={timelineEvent.id} className="timeline-event-preview">
+              <div key={timelineEvent.id} className={`timeline-event-preview ${!timelineEvent.checked ? 'unchecked' : ''}`}>
                 <span className="event-text">{timelineEvent.text}</span>
                 {timelineEvent.dialogue && (
                   <span className="event-dialogue">
@@ -238,6 +250,18 @@ const SortableSceneTab: React.FC<SortableSceneTabProps> = ({
           </div>
         ) : (
           <p className="text-sm text-muted">Empty timeline</p>
+        )}
+        
+        {/* Atmosphere Preview */}
+        {tab.atmosphere && (
+          <div className="atmosphere-preview">
+            <span className="text-sm text-muted">Atmosphere: </span>
+            <span className="text-sm">
+              {tab.atmosphere.length > 60 ? 
+                `${tab.atmosphere.substring(0, 60)}...` : 
+                tab.atmosphere}
+            </span>
+          </div>
         )}
       </div>
       
@@ -342,6 +366,18 @@ const SortableIdeaBankTab: React.FC<SortableIdeaBankTabProps> = ({
         ) : (
           <div className="empty-timeline">
             <p className="text-muted">No events yet</p>
+          </div>
+        )}
+        
+        {/* Atmosphere Preview */}
+        {tab.atmosphere && (
+          <div className="atmosphere-preview">
+            <span className="text-sm text-muted">Atmosphere: </span>
+            <span className="text-sm">
+              {tab.atmosphere.length > 60 ? 
+                `${tab.atmosphere.substring(0, 60)}...` : 
+                tab.atmosphere}
+            </span>
           </div>
         )}
       </div>
